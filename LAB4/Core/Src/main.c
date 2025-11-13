@@ -57,12 +57,25 @@ static void MX_TIM2_Init(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void timePrint(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 uint8_t temp = 0;
+
+/* Map function pointer -> tên task để in ra terminal */
+static const char* taskNameFor(void (*pTask)(void)) {
+    if (pTask == ledRedToggle)    return "ledRedToggle";
+    if (pTask == ledYellowToggle) return "ledYellowToggle";
+    if (pTask == ledGreenToggle)  return "ledGreenToggle";
+    if (pTask == ledAquaToggle)   return "ledAquaToggle";
+    if (pTask == ledBlueToggle)   return "ledBlueToggle";
+    if (pTask == ledPinkToggle)   return "ledPinkToggle";
+    if (pTask == timePrint)       return "timePrint";
+    if (pTask == NULL)            return "none";
+    return "unknown";
+}
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if(huart->Instance == USART2) {
@@ -71,11 +84,27 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     }
 }
 
+/* Chỉ in khi có log trong buffer, và mặc định bỏ qua các log của chính timePrint */
 void timePrint(void) {
-    char str[100];
-    HAL_UART_Transmit(&huart2, (void*)str, sprintf(str, "%lu\r\n", HAL_GetTick()), 10);
-}
+    while (SCH_LogHead != SCH_LogTail) {
+        /* Lấy 1 log từ buffer */
+        SCH_DispatchLog log = SCH_DispatchLogs[SCH_LogHead];
+        SCH_LogHead = (uint8_t)((SCH_LogHead + 1) % SCH_LOG_SIZE);
 
+        /* Bỏ qua chính timePrint nếu không muốn nhìn thấy */
+        if (log.pTask == timePrint) {
+            continue;
+        }
+
+        const char* name = taskNameFor(log.pTask);
+        char str[100];
+        int len = snprintf(str, sizeof(str), "%lu ms - dispatch: %s (id=%u)\r\n",
+                           (unsigned long)log.tick, name, (unsigned)log.id);
+        if (len > 0) {
+            HAL_UART_Transmit(&huart2, (uint8_t*)str, (uint16_t)len, 50);
+        }
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -125,7 +154,6 @@ int main(void)
   SCH_AddTask(ledBlueToggle, 0, 2000);
   SCH_AddTask(ledPinkToggle, 0, 2500);
   SCH_AddTask(timePrint, 0, 10);
-  SCH_AddTask(timePrint, 0, 500);
 
   while (1)
   {

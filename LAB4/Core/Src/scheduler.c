@@ -7,6 +7,23 @@
 
 #include "scheduler.h"
 
+/* Ring buffer log cho các lần dispatch */
+volatile SCH_DispatchLog SCH_DispatchLogs[SCH_LOG_SIZE];
+volatile uint8_t SCH_LogHead = 0;
+volatile uint8_t SCH_LogTail = 0;
+
+static void SCH_LogPush(void (*pTask)(void), uint8_t id) {
+    uint8_t nextTail = (uint8_t)((SCH_LogTail + 1) % SCH_LOG_SIZE);
+    /* Nếu đầy, bỏ log cũ nhất */
+    if (nextTail == SCH_LogHead) {
+        SCH_LogHead = (uint8_t)((SCH_LogHead + 1) % SCH_LOG_SIZE);
+    }
+    SCH_DispatchLogs[SCH_LogTail].pTask = pTask;
+    SCH_DispatchLogs[SCH_LogTail].id = id;
+    SCH_DispatchLogs[SCH_LogTail].tick = HAL_GetTick();
+    SCH_LogTail = nextTail;
+}
+
 void SCH_Init(void) {
     for (uint8_t i = 0; i < SCH_TASKNUMBER; i++) {
         tasks[i].pTask = NULL;
@@ -15,6 +32,7 @@ void SCH_Init(void) {
         tasks[i].period = 0;
         tasks[i].flag = 0;
     }
+    SCH_LogHead = SCH_LogTail = 0;
 }
 
 void SCH_Update(void) {
@@ -33,7 +51,15 @@ void SCH_Update(void) {
 
 void SCH_Dispatch(void) {
     if (tasks[0].pTask == 0 || tasks[0].flag == 0) return;
-    (*tasks[0].pTask)();
+
+    /* Gọi task */
+    void (*runTask)(void) = tasks[0].pTask;
+    uint8_t runId = tasks[0].id;
+    (*runTask)();
+
+    /* Ghi log sự kiện dispatch vừa xảy ra */
+    SCH_LogPush(runTask, runId);
+
     tasks[0].flag = 0;
     SCH_Task newTask = tasks[0];
     SCH_DeleteTask(tasks[0].id);
