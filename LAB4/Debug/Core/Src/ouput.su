@@ -1,0 +1,6 @@
+ouput.c:11:6:ledRedToggle	8	static
+ouput.c:15:6:ledYellowToggle	8	static
+ouput.c:19:6:ledGreenToggle	8	static
+ouput.c:23:6:ledAquaToggle	8	static
+ouput.c:27:6:ledBlueToggle	8	static
+ouput.c:31:6:ledPinkToggle	8	static

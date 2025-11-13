@@ -1,53 +1,34 @@
 /*
  * scheduler.h
  *
- *  Created on: Nov 12, 2025
- *      Author: ADMIN
+ *  Created on: Nov 30, 2024
+ *      Author: sine
  */
+#include "main.h"
 
-#ifndef SCHEDULER_H
-#define SCHEDULER_H
+#ifndef INC_SCHEDULER_H_
+#define INC_SCHEDULER_H_
+#include <stdint.h>
+#include <stddef.h>
 
-#include <stdint.h>  // Để dùng uint32_t, uint8_t
+#define SCH_TASKNUMBER    8
+#define SCH_TIMERTICK     10
 
-// Định nghĩa struct task (dựa trên gợi ý trong tài liệu)
 typedef struct {
-    void (*pTask)(void);  // Pointer đến function task
-    uint32_t Delay;       // Initial delay (ticks)
-    uint32_t Period;      // Interval (ticks), 0 nếu one-shot
-    uint8_t RunMe;        // Flag để dispatch biết task sẵn sàng
-    uint32_t TaskID;      // ID của task (hint từ tài liệu)
-} sTask;
+    void (*pTask)(void);
+    uint8_t id;
+    uint32_t delay;
+    uint32_t period;
+    unsigned char flag;
+} SCH_Task;
 
-// Constants
-#define SCH_MAX_TASKS 40     // Số task tối đa, điều chỉnh nếu cần
-#define NO_TASK_ID 0         // ID không hợp lệ
-
-// Error codes (tùy chọn, cho error reporting)
-#define ERROR_SCH_TOO_MANY_TASKS 1
-#define ERROR_SCH_CANNOT_DELETE_TASK 2
-// ... thêm các error khác nếu cần
-
-// Global variables (extern để declare)
-extern sTask SCH_tasks_G[SCH_MAX_TASKS];
-extern uint8_t Error_code_G;
-
-// Function prototypes
+SCH_Task tasks[SCH_TASKNUMBER];
 void SCH_Init(void);
-void SCH_Update(void);
-uint32_t SCH_Add_Task(void (*pFunction)(), uint32_t DELAY, uint32_t PERIOD);
-uint8_t SCH_Delete_Task(uint32_t taskID);
-void SCH_Dispatch_Tasks(void);
+void SCH_Dispatch(void);
 
-// Tùy chọn: Error reporting và power saving
-void SCH_Report_Status(void);
-void SCH_Go_To_Sleep(void);
+uint8_t SCH_AddTask(void (*pTask)(void), uint32_t delay, uint32_t period);
 
-// Tùy chọn: Watchdog (dựa trên Program 1.17)
-void Watchdog_Init(void);
-void Watchdog_Refresh(void);
-uint8_t Is_Watchdog_Reset(void);
-void Watchdog_Counting(void);
-void Reset_Watchdog_Counting(void);
+unsigned char SCH_DeleteTask(uint8_t id);
 
-#endif // SCHEDULER_H
+
+#endif /* INC_SCHEDULER_H_ */

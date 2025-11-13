@@ -1,136 +1,100 @@
 /*
  * scheduler.c
  *
- *  Created on: Nov 12, 2025
- *      Author: ADMIN
+ *  Created on: Nov 30, 2024
+ *      Author: sine
  */
 
-
 #include "scheduler.h"
-#include "main.h"  // Nếu cần HAL_TIM, HAL_IWDG từ project STM32
-
-// Global variables
-sTask SCH_tasks_G[SCH_MAX_TASKS];
-uint8_t Error_code_G = 0;
-static uint32_t last_error_code = 0;  // Cho report status
-static uint32_t error_tick_count = 0;
-static uint32_t counter_for_watchdog = 0;
-
-// Tùy chọn: IWDG handle nếu dùng watchdog
-IWDG_HandleTypeDef hiwdg;
 
 void SCH_Init(void) {
-    uint8_t i;
-    for (i = 0; i < SCH_MAX_TASKS; i++) {
-        SCH_Delete_Task(i);
+    for (uint8_t i = 0; i < SCH_TASKNUMBER; i++) {
+        tasks[i].pTask = NULL;
+        tasks[i].id = SCH_TASKNUMBER - i - 1;
+        tasks[i].delay = 0;
+        tasks[i].period = 0;
+        tasks[i].flag = 0;
     }
-    Error_code_G = 0;  // Reset error
-    // Init timer (ví dụ Timer 2 cho tick 10ms, tham khảo lab 3)
-    // Timer_init();  // Tùy chỉnh code init timer
-    Watchdog_Init();   // Nếu dùng
 }
 
 void SCH_Update(void) {
-    uint8_t index;
-    for (index = 0; index < SCH_MAX_TASKS; index++) {
-        if (SCH_tasks_G[index].pTask) {
-            if (SCH_tasks_G[index].Delay == 0) {
-                SCH_tasks_G[index].RunMe++;
-                if (SCH_tasks_G[index].Period) {
-                    SCH_tasks_G[index].Delay = SCH_tasks_G[index].Period;
+    if (tasks[0].pTask == 0) return;
+    if (tasks[0].delay > 0) {
+        if (tasks[0].delay > SCH_TIMERTICK) {
+            tasks[0].delay -= SCH_TIMERTICK;
+        } else {
+            tasks[0].delay = 0;
+        }
+    }
+    if (tasks[0].delay == 0) {
+        tasks[0].flag = 1;
+    }
+}
+
+void SCH_Dispatch(void) {
+    if (tasks[0].pTask == 0 || tasks[0].flag == 0) return;
+    (*tasks[0].pTask)();
+    tasks[0].flag = 0;
+    SCH_Task newTask = tasks[0];
+    SCH_DeleteTask(tasks[0].id);
+    if (newTask.period > 0) {
+        SCH_AddTask(newTask.pTask, newTask.period, newTask.period);
+    }
+}
+
+uint8_t SCH_AddTask(void (*pTask)(void), uint32_t delay, uint32_t period) {
+    if (tasks[SCH_TASKNUMBER - 1].pTask != 0) return SCH_TASKNUMBER;
+    uint8_t currentID = tasks[SCH_TASKNUMBER - 1].id;
+    uint32_t currentDelay = 0;
+    for (uint8_t i = 0; i < SCH_TASKNUMBER; i++) {
+        currentDelay += tasks[i].delay;
+        if (currentDelay > delay || tasks[i].pTask == 0) {
+            for (uint8_t j = SCH_TASKNUMBER - 1; j > i; j--) {
+                tasks[j] = tasks[j - 1];
+            }
+            tasks[i].pTask = pTask;
+            tasks[i].id = currentID;
+            tasks[i].period = period;
+            tasks[i].flag = 0;
+            if (currentDelay > delay) {
+                int newDelay = currentDelay - delay;
+                tasks[i].delay = tasks[i + 1].delay - newDelay;
+                if (tasks[i].delay == 0) {
+                    tasks[i].flag = 1;
+                }
+                tasks[i + 1].delay = newDelay;
+                if (tasks[i + 1].delay == 0) {
+                    tasks[i + 1].flag = 1;
                 }
             } else {
-                SCH_tasks_G[index].Delay--;
+                tasks[i].delay = delay - currentDelay;
+                if (tasks[i].delay == 0) {
+                    tasks[i].flag = 1;
+                }
             }
+            return tasks[i].id;
         }
     }
-    Watchdog_Refresh();  // Nếu dùng
-    // SCH_Report_Status();  // Có thể gọi ở đây hoặc dispatch
+    return SCH_TASKNUMBER;
 }
 
-uint32_t SCH_Add_Task(void (*pFunction)(), uint32_t DELAY, uint32_t PERIOD) {
-    uint32_t index = 0;
-    while ((SCH_tasks_G[index].pTask != 0) && (index < SCH_MAX_TASKS)) {
-        index++;
-    }
-    if (index == SCH_MAX_TASKS) {
-        Error_code_G = ERROR_SCH_TOO_MANY_TASKS;
-        return SCH_MAX_TASKS;  // Error
-    }
-    SCH_tasks_G[index].pTask = pFunction;
-    SCH_tasks_G[index].Delay = DELAY;
-    SCH_tasks_G[index].Period = PERIOD;
-    SCH_tasks_G[index].RunMe = 0;
-    SCH_tasks_G[index].TaskID = index;  // Gán ID
-    return index;  // Trả về ID
-}
-
-uint8_t SCH_Delete_Task(uint32_t taskID) {
-    if (taskID >= SCH_MAX_TASKS || SCH_tasks_G[taskID].pTask == 0) {
-        Error_code_G = ERROR_SCH_CANNOT_DELETE_TASK;
-        return 1;  // Error
-    }
-    SCH_tasks_G[taskID].pTask = 0;
-    SCH_tasks_G[taskID].Delay = 0;
-    SCH_tasks_G[taskID].Period = 0;
-    SCH_tasks_G[taskID].RunMe = 0;
-    SCH_tasks_G[taskID].TaskID = NO_TASK_ID;
-    return 0;  // Success
-}
-
-void SCH_Dispatch_Tasks(void) {
-    uint8_t index;
-    for (index = 0; index < SCH_MAX_TASKS; index++) {
-        if (SCH_tasks_G[index].RunMe > 0) {
-            (*SCH_tasks_G[index].pTask)();  // Chạy task
-            SCH_tasks_G[index].RunMe--;
-            if (SCH_tasks_G[index].Period == 0) {
-                SCH_Delete_Task(index);  // One-shot
+unsigned char SCH_DeleteTask(uint8_t id) {
+    for (uint8_t i = 0; i < SCH_TASKNUMBER; i++) {
+        if (tasks[i].id == id) {
+            uint8_t currentID = tasks[i].id;
+            if (tasks[i + 1].pTask != 0) {
+                tasks[i + 1].delay += tasks[i].delay;
             }
+            for (uint8_t j = i; j < SCH_TASKNUMBER - 1; j++) {
+                tasks[j] = tasks[j + 1];
+            }
+            tasks[SCH_TASKNUMBER - 1].pTask = 0;
+            tasks[SCH_TASKNUMBER - 1].id = currentID;
+            tasks[SCH_TASKNUMBER - 1].delay = 0;
+            tasks[SCH_TASKNUMBER - 1].period = 0;
+            tasks[SCH_TASKNUMBER - 1].flag = 0;
+            return tasks[SCH_TASKNUMBER - 1].pTask == 0;
         }
     }
-    SCH_Report_Status();  // Tùy chọn
-    SCH_Go_To_Sleep();   // Tùy chọn, vào idle mode
-}
-
-// Tùy chọn: Report status (Program 1.15)
-void SCH_Report_Status(void) {
-    // Implement hiển thị error qua LED hoặc port
-    if (Error_code_G != last_error_code) {
-        // Update port or LED
-        last_error_code = Error_code_G;
-        error_tick_count = 60000;  // 1 phút
-    } else if (error_tick_count > 0) {
-        error_tick_count--;
-        if (error_tick_count == 0) Error_code_G = 0;
-    }
-}
-
-// Tùy chọn: Go to sleep (Program 1.14)
-void SCH_Go_To_Sleep(void) {
-    // HAL_PWR_EnterSLEEPMode();  // Tùy MCU
-}
-
-// Tùy chọn: Watchdog functions (Program 1.17)
-void Watchdog_Init(void) {
-    hiwdg.Instance = IWDG;
-    hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
-    hiwdg.Init.Reload = 4095;
-    HAL_IWDG_Init(&hiwdg);
-}
-
-void Watchdog_Refresh(void) {
-    HAL_IWDG_Refresh(&hiwdg);
-}
-
-uint8_t Is_Watchdog_Reset(void) {
-    return (counter_for_watchdog > 3);
-}
-
-void Watchdog_Counting(void) {
-    counter_for_watchdog++;
-}
-
-void Reset_Watchdog_Counting(void) {
-    counter_for_watchdog = 0;
+    return 0;
 }
